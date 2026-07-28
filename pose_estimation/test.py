@@ -32,6 +32,7 @@ def test_pose_estimation(
     loss_fn=None,
     save=False,
     save_all=False,
+    gt_c2w_list=None,
 ):
     id_module.eval()
 
@@ -53,7 +54,19 @@ def test_pose_estimation(
         )
         c2w = torch.inverse(w2c)
 
-        pose = c2w
+        # Use the provided ground-truth pose if available (for error metrics),
+        # otherwise fall back to the camera pose derived from camera_info.
+        if gt_c2w_list is not None:
+            gt = gt_c2w_list[img_idx]
+            if isinstance(gt, np.ndarray):
+                pose = torch.from_numpy(gt).to(rays_ori.device, dtype=torch.float32)
+            elif isinstance(gt, torch.Tensor):
+                pose = gt.to(rays_ori.device, dtype=torch.float32)
+            else:
+                pose = torch.tensor(gt, device=rays_ori.device, dtype=torch.float32)
+        else:
+            pose = c2w
+
         focalX = fov2focal(camera_info.FovX, camera_info.width)
         focalY = fov2focal(camera_info.FovY, camera_info.height)
         target_camera_intrinsic = torch.tensor(
@@ -119,9 +132,10 @@ def test_pose_estimation(
                 model_up=camera_up_dir,
             )
             avg_score = avg_score.item()
-            target_idx = torch.topk(weights, k=100).indices
-            intersection = torch.count_nonzero(torch.isin(target_idx, idx))
-            recall = intersection.item() / target_idx.shape[0]
+            # Recall against the ground-truth top-k rays (by target score).
+            gt_top_idx = torch.topk(target_scores, k=100).indices
+            intersection = torch.count_nonzero(torch.isin(gt_top_idx, idx))
+            recall = intersection.item() / gt_top_idx.shape[0]
 
             # from visual import display_selected_and_gt_rays
             # display_selected_and_gt_rays(
@@ -298,6 +312,8 @@ def test_pose_estimation(
                 "total_optimization_time_in_ms": 0.0,
                 "pred_c2w": c2w_matrix.cpu().tolist(),
                 "gt_c2w": pose.cpu().tolist(),
+                "t_err_m": translation_error.item(),
+                "r_err_deg": angular_error.item(),
             }
         )
 

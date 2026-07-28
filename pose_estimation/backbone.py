@@ -3,6 +3,28 @@ from pose_estimation.superpoint import SuperPoint
 from typing import Sequence
 from torchvision import transforms
 
+def _load_dinov2_vits14():
+    """Load DINOv2 ViT-S/14 via torch.hub.
+
+    The torch.hub cache can end up with a hubconf.py that is inconsistent with
+    the package on disk (it imports `dinov2.dinov2.*` while the actual package is
+    `dinov2.*`, or vice versa). If torch.hub fails for that reason, import the
+    model directly from the cached repo, trying both layouts.
+    """
+    try:
+        return torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
+    except ModuleNotFoundError:
+        import os, sys
+        hub_dir = os.path.join(torch.hub.get_dir(), "facebookresearch_dinov2_main")
+        if hub_dir not in sys.path:
+            sys.path.insert(0, hub_dir)
+        try:
+            from dinov2.hub.backbones import dinov2_vits14
+        except ModuleNotFoundError:
+            from dinov2.dinov2.hub.backbones import dinov2_vits14
+        return dinov2_vits14()
+
+
 def create_backbone(
     type="dino",
     pretrained=False,
@@ -12,7 +34,7 @@ def create_backbone(
     **kwargs,
 ):
     if type == "dino":
-        model = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
+        model = _load_dinov2_vits14()
         wh = (16, 16)
         num_features = 384
     else:

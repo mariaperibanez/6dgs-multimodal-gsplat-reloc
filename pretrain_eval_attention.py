@@ -60,7 +60,7 @@ def pretrain_single_object(
 
     if lock_backbone:
         for parameter in id_module.backbone_wrapper.parameters():
-            parameter.require_grad = False
+            parameter.requires_grad = False
 
     start_iterations = 0
     id_module_ckpt_path = os.path.join(exp_dir_filepath, "id_module.th")
@@ -69,8 +69,13 @@ def pretrain_single_object(
         ckpt_dict = torch.load(id_module_ckpt_path, map_location=device)
         id_module.load_state_dict(ckpt_dict["model_state_dict"])
         start_iterations = ckpt_dict["epoch"]
-    
-    generator_callable = partial(explore_model, gs_model)
+
+    # Generate the rays only once and reuse them (this is the expensive step).
+    rays_ori, rays_dirs, rays_rgb = explore_model(gs_model)
+
+    # Generator that always returns the cached rays.
+    def generator_callable():
+        return rays_ori, rays_dirs, rays_rgb
 
     train_id_module(
         id_module_ckpt_path,
@@ -86,7 +91,6 @@ def pretrain_single_object(
 
     print("Training complete starting testing phase...")
     print("Testing overfit performances...")
-    rays_ori, rays_dirs, rays_rgb = explore_model(gs_model)
 
     model_up_np = np.mean(
         np.asarray(
@@ -115,11 +119,9 @@ def pretrain_single_object(
         category_id=category_name,
         # inerf_refinement=inerf_refinement,
         loss_fn=loss_fn,
-        # gs_model=gs_model,
         # save=True,
         # save_all=True,
     )
-    #
     print("Overfit AVG translation error: ", overfit_avg_translation_error)
     print("Overfit AVG angular error: ", overfit_avg_angular_error)
     print("Overfit AVG score error: ", overfit_avg_score)
@@ -163,7 +165,7 @@ def cache_model_on_gpu(ckpt_path, device):
 def explore_model(model: GaussianModel):
     point, dirs, rgb = generate_all_possible_rays(
         model,
-        sample_quadricell_targets=50,
+        sample_quadricell_targets=10,
     )
 
     return point, dirs, rgb
@@ -227,6 +229,7 @@ def main():
         object_id = experiment_to_test["sequence_id"]
         category_name = experiment_to_test["category_name"]
         checkpoint_args = get_checkpoint_arguments(exp_dir_filepath)
+        print("Running:", exp_dir_filepath, flush=True)
         try:
             obj_results = evaluate_single_object_in_blender(
                 checkpoint_filepath,
@@ -241,6 +244,7 @@ def main():
 
             results.extend(obj_results)
         except RuntimeError:
+            print("Failed experiment:", exp_dir_filepath, flush=True)
             traceback.print_exc()
 
     print("Saving results")

@@ -39,7 +39,16 @@ def readCamerasFromTTPoses(path, split, transformsfiles, imgfiles, intrinsics, w
         # c2w = torch.tensor(c2w, dtype=torch.float32).contiguous()
 
         # get the world-to-camera transform and set R, T
-        w2c = np.linalg.inv(c2w)
+        # Flip the X and Y axes to match the camera convention.
+        Fxy = np.array([
+            [-1, 0,  0, 0],
+            [ 0,-1,  0, 0],
+            [ 0, 0,  1, 0],
+            [ 0, 0,  0, 1]
+        ], dtype=np.float32)
+
+        w2c = Fxy @ np.linalg.inv(c2w)
+
         R = np.transpose(
             w2c[:3, :3]
         )  # R is stored transposed due to 'glm' in CUDA code
@@ -117,7 +126,6 @@ def read_tanksandtemples_scene_info(path, eval, white_background=True, extension
 
     pose_files = sorted(os.listdir(os.path.join(path, "pose")))
     img_files = sorted(os.listdir(os.path.join(path, "rgb")))
-
 
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTTPoses(path, "train", pose_files, img_files, intrinsics, white_background, downsample)

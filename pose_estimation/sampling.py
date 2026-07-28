@@ -135,25 +135,33 @@ def generate_all_possible_rays(
     #     point_sampling.shape[0], dtype=torch.long, device=point_sampling.device
     # )
 
-    # get ellipsoid subsample
+    # get ellipsoid subsample (guard against NaN/inf and degenerate scales)
     scale_all = model.get_scaling
-    mask_valid = mask_degraded_ellipsoids(
-        scale_all[..., 0],
-        scale_all[..., 1],
-        scale_all[..., 2],
+    eps = 1e-6
+    scale_all_clean = torch.nan_to_num(scale_all, nan=eps, posinf=eps, neginf=eps).abs().clamp_min(eps)
+
+    mask_geom_ok = torch.isfinite(scale_all).all(dim=-1) & (scale_all_clean > eps).all(dim=-1)
+
+    mask_not_degraded = mask_degraded_ellipsoids(
+        scale_all_clean[..., 0],
+        scale_all_clean[..., 1],
+        scale_all_clean[..., 2],
     )
+
+    mask_valid = mask_geom_ok & mask_not_degraded
+
     valid_num_elements = torch.count_nonzero(mask_valid).item()
+    if valid_num_elements == 0:
+        raise RuntimeError("No valid ellipsoids for quadricell sampling (mask_valid empty).")
+
     point_ellipsoid_idx = torch.randperm(
         valid_num_elements, dtype=torch.long, device=all_points.device
     )[: min(1000, valid_num_elements)]
+
     point_sampling = all_points[mask_valid][point_ellipsoid_idx]
+    scale = scale_all_clean[mask_valid][point_ellipsoid_idx]  # already cleaned
 
-    # point_normals = sampling_sphere(
-    #     dtype=point_sampling.dtype,
-    #     device=point_sampling.device,
-    #     num_viewdirs=point_sampling.shape[0],
-    # )
-
+    # Recompute normals from the sampled points.
     pts_per_chunk = 2500
     chunks = torch.split(
         torch.arange(
@@ -171,7 +179,6 @@ def generate_all_possible_rays(
         )
     point_normals = torch.cat(computed_normals, dim=0)
 
-    scale = model.get_scaling[mask_valid][point_ellipsoid_idx]
     points, ellipsoid_id = compute_quadricell_centers(
         scale[..., 0],
         scale[..., 1],

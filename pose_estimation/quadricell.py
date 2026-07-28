@@ -213,6 +213,7 @@ def compute_quadricell_centers(
         _,
         minor_axis_scaled,
     ) = combined_ellipses_perimeters(a, b, c, total_rings, square_approximation_side)
+    points_per_ellipse = torch.clamp(points_per_ellipse, min=3.0)
 
     delta_theta = 2 * math.pi / points_per_ellipse
     points_per_ellipse_long = points_per_ellipse.to(dtype=torch.long)
